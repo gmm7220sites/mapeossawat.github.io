@@ -1,0 +1,1215 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Control de Personal para Mapeos (Firebase)</title>
+    <!-- Incluye Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .nav-button.active { background-color: #3b82f6; color: white; }
+        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.4); }
+        .modal-content { background-color: #fefefe; margin: 5% auto; padding: 24px; border: 1px solid #888; width: 90%; max-width: 500px; border-radius: 12px; }
+        .toggle-switch { position: relative; display: inline-block; width: 44px; height: 24px; }
+        .toggle-switch input { opacity: 0; width: 0; height: 0; }
+        .toggle-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 34px; }
+        .toggle-slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 4px; bottom: 4px; background-color: white; transition: .4s; border-radius: 50%; }
+        input:checked + .toggle-slider { background-color: #16a34a; }
+        input:checked + .toggle-slider:before { transform: translateX(20px); }
+        .conflict-highlight { background-color: #fee2e2 !important; border-color: #ef4444 !important; }
+        .schedule-conflict-highlight { background-color: #fef08a !important; border-color: #f59e0b !important; }
+        .vestimenta-btn { cursor: pointer; font-size: 1.5rem; padding: 4px; border-radius: 8px; background-color: #e2e8f0; transition: background-color 0.2s ease; }
+        .vestimenta-btn:hover { background-color: #cbd5e1; }
+        .programacion-card { border-top: 4px solid; }
+        #loader { display: flex; position: fixed; inset: 0; background-color: rgba(255, 255, 255, 0.8); z-index: 9999; }
+        /* Estilos para la pantalla de login */
+        #login-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(241, 245, 249, 0.95); /* bg-slate-100 with opacity */
+            z-index: 10000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .main-content {
+            display: none; /* Oculto por defecto */
+        }
+        .local-header {
+            border-left-width: 6px;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+
+    <!-- Pantalla de Login -->
+    <div id="login-overlay">
+        <div class="bg-white p-8 rounded-xl shadow-lg w-full max-w-sm">
+            <h2 class="text-3xl font-bold text-center text-slate-800 mb-6">Iniciar Sesión</h2>
+            <form id="login-form">
+                <div class="mb-4">
+                    <label for="username" class="block text-slate-700 font-semibold mb-2">Usuario</label>
+                    <input type="text" id="username" class="w-full p-3 border border-slate-300 rounded-md focus:ring-2 focus:ring-blue-500" required>
+                </div>
+                <div class="mb-6">
+                    <label for="password" class="block text-slate-700 font-semibold mb-2">Contraseña</label>
+                    <input type="password" id="password" class="w-full p-3 border border-slate-300 rounded-md focus:ring-2 focus:ring-blue-500" required>
+                </div>
+                <button type="submit" class="w-full bg-blue-500 text-white font-bold py-3 px-4 rounded-md hover:bg-blue-600 transition-colors duration-300">Entrar</button>
+                <p id="login-error" class="text-red-500 text-center mt-4 text-sm"></p>
+            </form>
+        </div>
+    </div>
+
+    <!-- Loader -->
+    <div id="loader" class="items-center justify-center">
+        <div class="animate-spin rounded-full h-32 w-32 border-t-2 border-b-2 border-blue-500"></div>
+    </div>
+
+    <div class="container mx-auto p-4 md:p-8 max-w-7xl main-content">
+        <header class="text-center mb-8">
+            <h1 class="text-4xl font-bold text-slate-900">Panel de Control de Mapeos</h1>
+            <p class="text-slate-600 mt-2">Plataforma colaborativa para la gestión de personal y turnos.</p>
+        </header>
+
+        <div id="status-message-container" class="fixed top-4 right-4 z-50"></div>
+
+        <nav class="flex justify-center bg-slate-200 rounded-lg p-2 mb-8">
+            <button id="btn-gestion" class="nav-button active flex-1 text-center py-2 px-4 rounded-md font-semibold transition-colors duration-300">Gestión</button>
+            <button id="btn-mapeo" class="nav-button flex-1 text-center py-2 px-4 rounded-md font-semibold transition-colors duration-300">Mapeo Semanal</button>
+            <button id="btn-programacion" class="nav-button flex-1 text-center py-2 px-4 rounded-md font-semibold transition-colors duration-300">Programación</button>
+            <button id="btn-historial" class="nav-button flex-1 text-center py-2 px-4 rounded-md font-semibold transition-colors duration-300">Historial</button>
+        </nav>
+
+        <main>
+            <!-- SECCIONES (GESTION, MAPEO, ETC.) -->
+            <section id="section-gestion">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <!-- Columna Izquierda: Locales y Configuración -->
+                    <div class="bg-white p-6 rounded-xl shadow-md">
+                        <h2 class="text-2xl font-bold mb-4 text-slate-900">Gestión de Locales</h2>
+                        <form id="form-locales" class="flex gap-4 mb-6">
+                            <input type="text" id="nuevo-local" placeholder="Nombre del nuevo local" class="flex-grow p-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-blue-500" required>
+                            <button type="submit" class="bg-blue-500 text-white font-bold py-2 px-4 rounded-md hover:bg-blue-600">Agregar</button>
+                        </form>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left">
+                                <thead class="bg-slate-100">
+                                    <tr>
+                                        <th class="p-3 font-semibold">Local</th>
+                                        <th class="p-3 font-semibold text-right">Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tabla-locales"></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Columna Derecha: Personal -->
+                    <div class="bg-white p-6 rounded-xl shadow-md">
+                        <div class="flex flex-wrap justify-between items-center mb-4 gap-4">
+                            <h2 class="text-2xl font-bold text-slate-900">Base de Datos del Personal</h2>
+                            <div class="flex gap-2">
+                                <button id="btn-importar-personal" class="bg-sky-500 text-white font-bold py-2 px-4 rounded-md hover:bg-sky-600">Importar Excel</button>
+                                <button id="btn-exportar-personal" class="bg-emerald-500 text-white font-bold py-2 px-4 rounded-md hover:bg-emerald-600">Exportar Excel</button>
+                                <input type="file" id="import-personal-input" class="hidden" accept=".xlsx, .xls">
+                            </div>
+                        </div>
+                        <form id="form-personal" class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                            <input type="text" id="nombre" placeholder="Nombre" class="p-2 border border-slate-300 rounded-md" required>
+                            <input type="text" id="apellido" placeholder="Apellido" class="p-2 border border-slate-300 rounded-md" required>
+                            <input type="tel" id="telefono" placeholder="Teléfono" class="p-2 border border-slate-300 rounded-md" required>
+                            <select id="disponibilidad" class="p-2 border border-slate-300 rounded-md" required><option value="disponible">Disponible</option><option value="no-disponible">No Disponible</option></select>
+                            <select id="local1" class="p-2 border border-slate-300 rounded-md"><option value="">Local Preferido 1</option></select>
+                            <select id="local2" class="p-2 border border-slate-300 rounded-md"><option value="">Local Preferido 2</option></select>
+                            <select id="local3" class="p-2 border border-slate-300 rounded-md"><option value="">Local Preferido 3</option></select>
+                            <button type="submit" class="md:col-span-2 bg-blue-500 text-white font-bold py-2 px-4 rounded-md hover:bg-blue-600">Agregar Personal</button>
+                        </form>
+                        <div class="overflow-x-auto"><table class="w-full text-left"><thead class="bg-slate-100"><tr><th class="p-3">Nombre</th><th class="p-3">Teléfono</th><th class="p-3">Disponibilidad</th><th class="p-3">Locales</th><th class="p-3 text-right">Acciones</th></tr></thead><tbody id="tabla-personal"></tbody></table></div>
+                    </div>
+                </div>
+            </section>
+            <section id="section-mapeo" class="hidden">
+                <div class="bg-white p-6 rounded-xl shadow-md">
+                    <div class="flex flex-col md:flex-row items-center gap-4 mb-6">
+                        <label for="semana-mapeo" class="font-semibold">Semana:</label>
+                        <input type="week" id="semana-mapeo" class="p-2 border rounded-md">
+                        <input type="text" id="filtro-local-busqueda" placeholder="Buscar local..." class="flex-grow p-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div class="flex justify-end gap-2 mb-6">
+                        <button id="btn-guardar-programacion" class="bg-blue-500 text-white font-bold py-2 px-4 rounded-md hover:bg-blue-600">Guardar</button>
+                        <button id="btn-limpiar-mapeo" class="bg-red-500 text-white font-bold py-2 px-4 rounded-md hover:bg-red-600">Limpiar</button>
+                        <button id="btn-descargar-excel" class="bg-green-500 text-white font-bold py-2 px-4 rounded-md hover:bg-green-600">Excel</button>
+                    </div>
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8" id="mapeo-container"></div>
+                </div>
+            </section>
+            <section id="section-programacion" class="hidden">
+                <div class="bg-white p-6 rounded-xl shadow-md">
+                    <div class="flex flex-col md:flex-row items-center gap-4 mb-6">
+                        <label for="semana-programacion" class="font-semibold">Semana:</label>
+                        <input type="week" id="semana-programacion" class="p-2 border rounded-md">
+                        <input type="text" id="busqueda-programacion" placeholder="Buscar personal..." class="flex-grow p-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div id="programacion-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
+                </div>
+            </section>
+            <section id="section-historial" class="hidden"><div class="bg-white p-6 rounded-xl shadow-md"><h2 class="text-2xl font-bold mb-4">Historial</h2><div id="historial-container" class="overflow-x-auto"></div></div></section>
+        </main>
+    </div>
+
+    <!-- MODALES -->
+    <div id="edit-modal" class="modal"><div class="modal-content"><h3 class="text-2xl font-bold mb-4">Editar Personal</h3><form id="form-edit-personal" class="grid grid-cols-1 md:grid-cols-2 gap-4"><input type="hidden" id="edit-id"><input type="text" id="edit-nombre" placeholder="Nombre" class="p-2 border rounded-md" required><input type="text" id="edit-apellido" placeholder="Apellido" class="p-2 border rounded-md" required><input type="tel" id="edit-telefono" placeholder="Teléfono" class="p-2 border rounded-md" required><select id="edit-disponibilidad" class="p-2 border rounded-md" required><option value="disponible">Disponible</option><option value="no-disponible">No Disponible</option></select><select id="edit-local1" class="p-2 border rounded-md"><option value="">Local 1</option></select><select id="edit-local2" class="p-2 border rounded-md"><option value="">Local 2</option></select><select id="edit-local3" class="p-2 border rounded-md"><option value="">Local 3</option></select><button type="submit" class="md:col-span-2 bg-green-500 text-white font-bold py-2 px-4 rounded-md hover:bg-green-600">Guardar</button><button type="button" id="close-modal" class="md:col-span-2 bg-slate-300 py-2 px-4 rounded-md hover:bg-slate-400">Cancelar</button></form></div></div>
+    <div id="edit-local-modal" class="modal"><div class="modal-content"><h3 class="text-2xl font-bold mb-4">Editar Local</h3><form id="form-edit-local" class="flex flex-col gap-4"><input type="hidden" id="edit-local-id"><input type="text" id="edit-local-name" placeholder="Nombre del Local" class="p-2 border rounded-md" required><div class="flex items-center gap-4"><label for="edit-local-color">Color:</label><input type="color" id="edit-local-color" class="h-10 w-10"></div><div class="flex gap-4"><button type="submit" class="flex-1 bg-green-500 text-white font-bold py-2 px-4 rounded-md hover:bg-green-600">Guardar</button><button type="button" id="close-local-modal" class="flex-1 bg-slate-300 py-2 px-4 rounded-md hover:bg-slate-400">Cancelar</button></div></form></div></div>
+    <div id="schedule-config-modal" class="modal">
+        <div class="modal-content !max-w-3xl">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-2xl font-bold">Configurar Horarios para <span id="schedule-config-local-name"></span></h3>
+                <button type="button" id="close-schedule-config-modal" class="text-3xl font-bold text-slate-500 hover:text-slate-800">&times;</button>
+            </div>
+            <div id="schedule-config-container" class="space-y-4 max-h-[60vh] overflow-y-auto p-2 bg-slate-50 rounded-lg"></div>
+            <div class="mt-4 pt-4 border-t flex justify-end">
+                <button type="button" id="btn-limpiar-horarios-local" class="bg-red-500 text-white font-bold py-2 px-4 rounded-md hover:bg-red-600">Limpiar Todos los Puestos</button>
+            </div>
+        </div>
+    </div>
+    <div id="message-modal" class="modal"><div class="modal-content"><p id="message-modal-text" class="mb-4"></p><button id="close-message-modal" class="w-full bg-blue-500 text-white font-bold py-2 px-4 rounded-md hover:bg-blue-600">OK</button></div></div>
+
+    <script type="module">
+        // Importaciones de Firebase
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.1/firebase-auth.js";
+        import { getFirestore, collection, doc, onSnapshot, addDoc, setDoc, deleteDoc, query } from "https://www.gstatic.com/firebasejs/10.12.1/firebase-firestore.js";
+
+        // --- INICIO: Configuración de Firebase ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyBwtZ8Kdvw4LJyu3t0QeaBgq6_0Z_9jrvw",
+            authDomain: "swattmapee.firebaseapp.com",
+            databaseURL: "https://swattmapee-default-rtdb.firebaseio.com",
+            projectId: "swattmapee",
+            storageBucket: "swattmapee.appspot.com",
+            messagingSenderId: "522791414169",
+            appId: "1:522791414169:web:7c2d3c567fbd1d5703cb08",
+            measurementId: "G-LSH6K1XH89"
+        };
+        // --- FIN: Configuración de Firebase ---
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        // Referencias a Colecciones de Firestore
+        let personalCol, localesCol, mapeoConfigCol, asignacionesCol, historialCol;
+
+        // Estado local de la aplicación
+        let state = {
+            personal: [],
+            locales: [],
+            mapeoConfig: {},
+            asignaciones: {},
+            historial: {},
+            selectedWeek: '',
+            currentView: 'gestion',
+            searchTermMapeo: '',
+            searchTermProgramacion: '',
+            dailyConflicts: new Set(),
+            scheduleConflicts: new Set(),
+            isAuthReady: false
+        };
+
+        // Constantes y Elementos del DOM
+        const diasSemana = ['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo'];
+        const diasSemanaFull = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+        const vestimentaOptions = ['Ropa Táctica', 'Terno'];
+        const vestimentaEmojis = { 'Ropa Táctica': '🥋', 'Terno': '🤵' };
+        const tipoPuestoNombres = {
+            'puestos': 'Puesto',
+            'cacheos': 'Cacheo',
+            'cacheoIngreso': 'C. Ingreso',
+            'cacheoSalida': 'C. Salida'
+        };
+        const loader = document.getElementById('loader');
+        const mainContent = document.querySelector('.main-content');
+        const loginOverlay = document.getElementById('login-overlay');
+        const loginForm = document.getElementById('login-form');
+        const loginError = document.getElementById('login-error');
+        const allSections = document.querySelectorAll('main > section');
+        const navButtons = document.querySelectorAll('nav > button');
+        const formPersonal = document.getElementById('form-personal');
+        const formLocales = document.getElementById('form-locales');
+        const formEditPersonal = document.getElementById('form-edit-personal');
+        const formEditLocal = document.getElementById('form-edit-local');
+        const semanaInputMapeo = document.getElementById('semana-mapeo');
+        const semanaInputProgramacion = document.getElementById('semana-programacion');
+        const busquedaProgramacionInput = document.getElementById('busqueda-programacion');
+        const filtroLocalBusquedaInput = document.getElementById('filtro-local-busqueda');
+        const editModal = document.getElementById('edit-modal');
+        const editLocalModal = document.getElementById('edit-local-modal');
+        const scheduleConfigModal = document.getElementById('schedule-config-modal');
+        const importPersonalInput = document.getElementById('import-personal-input');
+
+
+        // --- AUTENTICACIÓN Y SETUP DE FIREBASE ---
+        loginForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const user = loginForm.username.value;
+            const pass = loginForm.password.value;
+            loginError.textContent = '';
+
+            if (user === 'adminswat' && pass === 'adminswat') {
+                loader.style.display = 'flex';
+                signInAnonymously(auth).catch(error => {
+                    console.error("Error en la autenticación anónima:", error);
+                    if (error.code === 'auth/configuration-not-found') {
+                        showStatusMessage('Error: La autenticación anónima no está habilitada en la Consola de Firebase.', 'error');
+                        loader.style.display = 'none';
+                    }
+                });
+            } else {
+                loginError.textContent = 'Usuario o contraseña incorrectos.';
+            }
+        });
+
+        onAuthStateChanged(auth, user => {
+            if (user) {
+                loginOverlay.style.display = 'none';
+                mainContent.style.display = 'block';
+
+                const appId = "mapeo-app-v2";
+                const basePath = `artifacts/${appId}/public/data`;
+                personalCol = collection(db, `${basePath}/personal`);
+                localesCol = collection(db, `${basePath}/locales`);
+                mapeoConfigCol = collection(db, `${basePath}/mapeoConfig`);
+                asignacionesCol = collection(db, `${basePath}/asignaciones`);
+                historialCol = collection(db, `${basePath}/historial`);
+
+                state.isAuthReady = true;
+                setupListeners();
+                inicializarApp();
+            } else {
+                loginOverlay.style.display = 'flex';
+                mainContent.style.display = 'none';
+                loader.style.display = 'none';
+            }
+        });
+
+        // --- SETUP DE LISTENERS DE DATOS EN TIEMPO REAL (OPTIMIZADO) ---
+        function setupListeners() {
+            if (!state.isAuthReady) return;
+
+            onSnapshot(query(localesCol), snapshot => {
+                state.locales = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                renderizarTablaLocales();
+                renderizarSelectsLocales();
+                if (state.currentView === 'mapeo') renderizarMapeo();
+            });
+
+            onSnapshot(query(personalCol), snapshot => {
+                state.personal = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                renderizarTablaPersonal();
+                if (state.currentView === 'mapeo') renderizarMapeo();
+                if (state.currentView === 'programacion') renderizarProgramacionPersonal();
+            });
+
+            onSnapshot(query(mapeoConfigCol), snapshot => {
+                state.mapeoConfig = {};
+                snapshot.docs.forEach(doc => { state.mapeoConfig[doc.id] = doc.data(); });
+                if (state.currentView === 'mapeo') renderizarMapeo();
+            });
+
+            onSnapshot(query(asignacionesCol), snapshot => {
+                state.asignaciones = {};
+                snapshot.docs.forEach(doc => { state.asignaciones[doc.id] = doc.data(); });
+                recalculateConflicts();
+                if (state.currentView === 'mapeo') renderizarMapeo();
+                if (state.currentView === 'programacion') renderizarProgramacionPersonal();
+            });
+
+            onSnapshot(query(historialCol), snapshot => {
+                state.historial = {};
+                snapshot.docs.forEach(doc => { state.historial[doc.id] = doc.data(); });
+                if (state.currentView === 'historial') renderizarHistorial();
+            });
+        }
+        
+        // --- LÓGICA DE RENDERIZADO ---
+        function renderizarTablaLocales() {
+            const tabla = document.getElementById('tabla-locales');
+            tabla.innerHTML = '';
+            state.locales.sort((a, b) => a.nombre.localeCompare(b.nombre)).forEach(local => {
+                const row = tabla.insertRow();
+                row.innerHTML = `
+                    <td class="p-3 font-medium flex items-center gap-3">
+                        <span class="h-4 w-4 rounded-full" style="background-color: ${local.color || '#cccccc'}"></span>
+                        ${local.nombre.toUpperCase()}
+                    </td>
+                    <td class="p-3 text-right space-x-2">
+                        <button data-id="${local.id}" data-nombre="${local.nombre}" data-color="${local.color || '#cccccc'}" class="btn-editar-local bg-yellow-400 text-white font-bold py-1 px-3 rounded-md hover:bg-yellow-500">Editar</button>
+                        <button data-id="${local.id}" data-nombre="${local.nombre}" class="btn-configurar-horarios bg-teal-500 text-white font-bold py-1 px-3 rounded-md hover:bg-teal-600">Horarios</button>
+                        <button data-id="${local.id}" class="btn-eliminar-local bg-red-500 text-white font-bold py-1 px-3 rounded-md hover:bg-red-600">Eliminar</button>
+                    </td>
+                `;
+            });
+        }
+
+        function renderizarTablaPersonal() {
+            const tabla = document.getElementById('tabla-personal');
+            tabla.innerHTML = '';
+            state.personal.sort((a,b) => `${a.apellido} ${a.nombre}`.localeCompare(`${b.apellido} ${b.nombre}`)).forEach(p => {
+                const row = tabla.insertRow();
+                const disponibleClass = p.disponibilidad === 'disponible' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800';
+                row.innerHTML = `
+                    <td class="p-3">${p.nombre} ${p.apellido}</td>
+                    <td class="p-3">${p.telefono}</td>
+                    <td class="p-3"><span class="px-2 py-1 text-sm font-medium rounded-full ${disponibleClass}">${p.disponibilidad}</span></td>
+                    <td class="p-3 text-sm text-slate-600">${[p.local1, p.local2, p.local3].filter(l => l).join(', ') || 'N/A'}</td>
+                    <td class="p-3 text-right space-x-2">
+                        <button data-id="${p.id}" class="btn-editar-personal bg-yellow-400 text-white font-bold py-1 px-3 rounded-md hover:bg-yellow-500">Editar</button>
+                        <button data-id="${p.id}" class="btn-eliminar-personal bg-red-500 text-white font-bold py-1 px-3 rounded-md hover:bg-red-600">Eliminar</button>
+                    </td>
+                `;
+            });
+        }
+
+        function renderizarSelectsLocales() {
+            const selects = document.querySelectorAll('select[id*="local"]');
+            selects.forEach(select => {
+                const currentValue = select.value;
+                const firstOption = select.options[0].outerHTML;
+                select.innerHTML = firstOption;
+                state.locales.forEach(local => {
+                    select.innerHTML += `<option value="${local.nombre}">${local.nombre.toUpperCase()}</option>`;
+                });
+                select.value = currentValue;
+            });
+        }
+
+        function renderizarMapeoConfig(localNombre, container) {
+            const local = state.locales.find(l => l.nombre === localNombre);
+            if (!local) return;
+            container.innerHTML = '';
+            const localConfig = state.mapeoConfig[local.nombre] || {};
+            
+            const createTimeSelectors = (dia, tipo, config) => {
+                const horaKey = `hora${tipo.charAt(0).toUpperCase() + tipo.slice(1)}`;
+                const [h, m, ampm] = (config[horaKey] || "12:00 AM").match(/(\d+):(\d+) (AM|PM)/).slice(1);
+                return `
+                    <select data-local="${local.nombre}" data-dia="${dia}" data-type="${tipo}" data-part="hour" class="mapeo-config-input p-1 border rounded">${Array.from({length: 12}, (_, i) => `<option value="${i+1}" ${h == i+1 ? 'selected' : ''}>${i+1}</option>`).join('')}</select>
+                    <select data-local="${local.nombre}" data-dia="${dia}" data-type="${tipo}" data-part="minute" class="mapeo-config-input p-1 border rounded"><option value="00" ${m == '00' ? 'selected' : ''}>00</option><option value="30" ${m == '30' ? 'selected' : ''}>30</option></select>
+                    <select data-local="${local.nombre}" data-dia="${dia}" data-type="${tipo}" data-part="ampm" class="mapeo-config-input p-1 border rounded"><option ${ampm === 'AM' ? 'selected' : ''}>AM</option><option ${ampm === 'PM' ? 'selected' : ''}>PM</option></select>
+                `;
+            };
+
+            diasSemana.forEach(dia => {
+                const config = localConfig[dia] || {};
+                const diaDiv = document.createElement('div');
+                diaDiv.className = 'mb-2 p-3 bg-white rounded-md border';
+                diaDiv.innerHTML = `
+                    <p class="font-semibold capitalize">${dia}</p>
+                    <div class="flex items-center gap-2 mt-2">
+                        <label class="text-sm w-20">Puestos:</label>
+                        <input type="number" data-local="${local.nombre}" data-dia="${dia}" data-type="puestos" data-part="count" class="mapeo-config-input w-16 p-1 border rounded" min="0" value="${config.puestos || 0}">
+                        ${createTimeSelectors(dia, 'puestos', config)}
+                    </div>
+                    <div class="flex items-center gap-2 mt-2">
+                        <label class="text-sm w-20">Cacheos:</label>
+                        <input type="number" data-local="${local.nombre}" data-dia="${dia}" data-type="cacheos" data-part="count" class="mapeo-config-input w-16 p-1 border rounded" min="0" value="${config.cacheos || 0}">
+                        ${createTimeSelectors(dia, 'cacheos', config)}
+                    </div>
+                    <div class="flex items-center gap-2 mt-2">
+                        <label class="text-sm w-20">C. Ingreso:</label>
+                        <input type="number" data-local="${local.nombre}" data-dia="${dia}" data-type="cacheoIngreso" data-part="count" class="mapeo-config-input w-16 p-1 border rounded" min="0" value="${config.cacheoIngreso || 0}">
+                        ${createTimeSelectors(dia, 'cacheoIngreso', config)}
+                    </div>
+                    <div class="flex items-center gap-2 mt-2">
+                        <label class="text-sm w-20">C. Salida:</label>
+                        <input type="number" data-local="${local.nombre}" data-dia="${dia}" data-type="cacheoSalida" data-part="count" class="mapeo-config-input w-16 p-1 border rounded" min="0" value="${config.cacheoSalida || 0}">
+                        ${createTimeSelectors(dia, 'cacheoSalida', config)}
+                    </div>
+                `;
+                container.appendChild(diaDiv);
+            });
+        }
+
+        function renderizarMapeo() {
+            const container = document.getElementById('mapeo-container');
+            container.innerHTML = '';
+            const week = state.selectedWeek;
+            if (!week) return;
+
+            const dates = getWeekDates(week);
+            const localesFiltrados = state.locales.filter(local => 
+                local.nombre.toLowerCase().includes(state.searchTermMapeo)
+            );
+
+            localesFiltrados.forEach(local => {
+                const localConfig = state.mapeoConfig[local.nombre] || {};
+                const hasPositions = diasSemana.some(dia => (localConfig[dia]?.puestos > 0) || (localConfig[dia]?.cacheos > 0) || (localConfig[dia]?.cacheoIngreso > 0) || (localConfig[dia]?.cacheoSalida > 0));
+                if (!hasPositions) return;
+
+                const localCol = document.createElement('div');
+                localCol.className = 'bg-white p-6 rounded-xl shadow-md local-header';
+                localCol.style.borderColor = local.color || '#cccccc';
+                localCol.innerHTML = `
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-2xl font-bold">${local.nombre.toUpperCase()}</h3>
+                        <div class="flex items-center gap-2">
+                            <button data-local-nombre="${local.nombre}" title="Cambiar vestimenta para este local" class="btn-cambiar-vestimenta-local text-2xl p-1 rounded-md hover:bg-slate-200">🔄</button>
+                            <button data-local-nombre="${local.nombre}" class="btn-copy-local-schedule bg-sky-100 text-sky-700 font-bold py-1 px-3 rounded-md hover:bg-sky-200 text-sm">Copiar</button>
+                        </div>
+                    </div>`;
+                
+                diasSemana.forEach(dia => {
+                    const config = localConfig[dia];
+                    if (config && ((config.puestos > 0) || (config.cacheos > 0) || (config.cacheoIngreso > 0) || (config.cacheoSalida > 0))) {
+                        const diaContenedor = document.createElement('div');
+                        diaContenedor.className = 'mb-6 p-4 bg-slate-100 rounded-lg';
+                        diaContenedor.innerHTML = `<h4 class="text-lg font-bold capitalize">${dia} <span class="text-sm font-normal text-slate-500">${dates[dia] || ''}</span></h4>`;
+                        
+                        const createSubSection = (tipo, count, hora) => {
+                             if (count > 0) {
+                                const sub = document.createElement('div');
+                                sub.className = 'mt-2';
+                                sub.innerHTML = `<h5 class="font-semibold text-sm mb-2">${tipoPuestoNombres[tipo]}</h5>`;
+                                for (let i = 1; i <= count; i++) {
+                                    sub.appendChild(crearSelectAsignacion(tipo, local.nombre, dia, i, hora));
+                                }
+                                diaContenedor.appendChild(sub);
+                            }
+                        };
+                        
+                        createSubSection('puestos', config.puestos, config.horaPuestos);
+                        createSubSection('cacheos', config.cacheos, config.horaCacheos);
+                        createSubSection('cacheoIngreso', config.cacheoIngreso, config.horaCacheoIngreso);
+                        createSubSection('cacheoSalida', config.cacheoSalida, config.horaCacheoSalida);
+                       
+                        localCol.appendChild(diaContenedor);
+                    }
+                });
+                container.appendChild(localCol);
+            });
+        }
+
+        function crearSelectAsignacion(tipo, local, dia, i, hora) {
+            const week = state.selectedWeek;
+            const slotId = `${local}-${dia}-${tipo}-${i}`;
+            const asignacionActual = state.asignaciones[week]?.[slotId] || '';
+            const div = document.createElement('div');
+            div.className = 'flex items-center gap-2 mb-2 p-2 rounded-md bg-slate-50 border-l-4 border-transparent';
+
+            if (state.dailyConflicts.has(asignacionActual)) div.classList.add('conflict-highlight');
+            if (state.scheduleConflicts.has(`${week}-${slotId}`)) div.classList.add('schedule-conflict-highlight');
+
+            const select = document.createElement('select');
+            select.dataset.slotId = slotId;
+            select.className = 'mapeo-select flex-grow p-2 border rounded bg-white';
+            
+            let options = '<option value="">-- Seleccionar --</option>';
+            state.personal.filter(p => p.disponibilidad === 'disponible').forEach(p => {
+                const personaId = p.id;
+                options += `<option value="${personaId}" ${personaId === asignacionActual ? 'selected' : ''}>${p.nombre} ${p.apellido}</option>`;
+            });
+            select.innerHTML = options;
+            
+            const vestimentaActual = state.asignaciones[week]?.[`${slotId}-vestimenta`] || vestimentaOptions[0];
+            const vestimentaBtn = document.createElement('button');
+            vestimentaBtn.className = 'vestimenta-btn';
+            vestimentaBtn.textContent = vestimentaEmojis[vestimentaActual];
+            vestimentaBtn.title = `Vestimenta: ${vestimentaActual}`;
+            vestimentaBtn.dataset.slotId = slotId;
+
+            const isConfirmed = state.asignaciones[week]?.[`${slotId}-confirmed`] || false;
+            const confirmationSwitch = document.createElement('div');
+            confirmationSwitch.className = 'toggle-switch-container';
+            confirmationSwitch.title = 'Confirmado';
+            confirmationSwitch.innerHTML = `<label class="toggle-switch"><input type="checkbox" class="confirmation-checkbox" data-slot-id="${slotId}" ${isConfirmed ? 'checked' : ''}><span class="toggle-slider"></span></label>`;
+            
+            div.innerHTML = `<span class="font-semibold w-8 text-slate-600">${i}.</span><span class="font-semibold w-24 text-sm text-slate-600">${hora || 'N/A'}</span>`;
+            div.appendChild(select);
+            div.appendChild(vestimentaBtn);
+            div.appendChild(confirmationSwitch);
+            return div;
+        }
+
+        function renderizarProgramacionPersonal() {
+            const container = document.getElementById('programacion-container');
+            container.innerHTML = '';
+            const week = state.selectedWeek;
+            if (!week) return;
+            
+            const personalFiltrado = state.personal.filter(p => 
+                `${p.nombre} ${p.apellido}`.toLowerCase().includes(state.searchTermProgramacion)
+            );
+
+            personalFiltrado.forEach(persona => {
+                const asignacionesSemana = state.asignaciones[week] || {};
+                const assignments = Object.entries(asignacionesSemana)
+                    .filter(([slotId, pId]) => pId === persona.id && !slotId.includes('-vestimenta') && !slotId.includes('-confirmed'))
+                    .map(([slotId, _]) => {
+                        const [local, dia, tipo] = slotId.split('-');
+                        const config = state.mapeoConfig[local]?.[dia] || {};
+                        const horaKey = `hora${tipo.charAt(0).toUpperCase() + tipo.slice(1)}`;
+                        return {
+                            slotId: `${week}-${slotId}`,
+                            local, dia, tipo,
+                            horario: config[horaKey],
+                            vestimenta: asignacionesSemana[`${slotId}-vestimenta`] || vestimentaOptions[0],
+                            isConfirmed: asignacionesSemana[`${slotId}-confirmed`] || false,
+                            isDailyConflict: state.dailyConflicts.has(persona.id)
+                        };
+                    })
+                    .sort((a, b) => diasSemana.indexOf(a.dia) - diasSemana.indexOf(b.dia));
+                
+                const card = document.createElement('div');
+                card.className = `programacion-card bg-white p-6 rounded-xl shadow-md ${assignments.length > 0 ? 'border-green-500' : 'border-slate-200'}`;
+                
+                let assignmentsHTML = assignments.length > 0 ? `<ul class="mt-4 space-y-2">${assignments.map(a => {
+                    let conflictClass = '';
+                    if (a.isDailyConflict) conflictClass = 'conflict-highlight';
+                    if (state.scheduleConflicts.has(a.slotId)) conflictClass = 'schedule-conflict-highlight';
+                    return `<li class="p-3 rounded-lg border bg-slate-50 text-sm flex justify-between items-center ${conflictClass}">
+                        <span><span class="font-bold">${diasSemanaFull[diasSemana.indexOf(a.dia)]}</span> - ${a.local.toUpperCase()}<br><span class="text-xs text-slate-500">${tipoPuestoNombres[a.tipo] || a.tipo} (${a.horario})</span></span>
+                        <span class="flex items-center gap-2"><span class="text-2xl" title="Vestimenta: ${a.vestimenta}">${vestimentaEmojis[a.vestimenta]}</span><span class="text-xl">${a.isConfirmed ? '✅' : '❌'}</span></span>
+                    </li>`;
+                }).join('')}</ul>` : '<p class="text-sm text-slate-500 mt-2">Sin asignaciones esta semana.</p>';
+
+                card.innerHTML = `
+                    <div class="flex justify-between items-center">
+                        <h4 class="text-lg font-bold">${persona.nombre} ${persona.apellido}</h4>
+                        <div class="flex gap-2">
+                             <button data-person-id="${persona.id}" class="btn-confirmar-persona bg-green-100 text-green-800 font-bold py-1 px-3 rounded-md hover:bg-green-200">Confirmar</button>
+                             <button data-person-id="${persona.id}" class="btn-copy-schedule bg-blue-100 text-blue-700 font-bold py-1 px-3 rounded-md hover:bg-blue-200">Copiar</button>
+                        </div>
+                    </div>
+                    ${assignmentsHTML}`;
+                container.appendChild(card);
+            });
+        }
+
+        function renderizarHistorial() {
+            const container = document.getElementById('historial-container');
+            container.innerHTML = `<table class="w-full text-left"><thead class="bg-slate-100"><tr><th class="p-3">Semana</th><th class="p-3">Asignaciones</th><th class="p-3 text-right">Acciones</th></tr></thead><tbody>${Object.keys(state.historial).length === 0 ? `<tr><td colspan="3" class="p-4 text-center text-slate-500">No hay programaciones guardadas.</td></tr>` : Object.entries(state.historial).map(([week, data]) => `
+                <tr class="border-b"><td class="p-3 font-medium">${week}</td><td class="p-3">${Object.keys(data.asignaciones || {}).filter(k => !k.includes('-')).length}</td><td class="p-3 text-right space-x-2">
+                    <button data-week="${week}" class="btn-cargar-historial bg-blue-500 text-white font-bold py-1 px-3 rounded-md hover:bg-blue-600">Cargar</button>
+                    <button data-week="${week}" class="btn-descargar-historial bg-green-500 text-white font-bold py-1 px-3 rounded-md hover:bg-green-600">Excel</button>
+                    <button data-week="${week}" class="btn-eliminar-historial bg-red-500 text-white font-bold py-1 px-3 rounded-md hover:bg-red-600">Eliminar</button>
+                </td></tr>`).join('')}</tbody></table>`;
+        }
+        
+        // --- LÓGICA DE EVENTOS ---
+        formPersonal.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const nuevaPersona = {
+                nombre: e.target.nombre.value, apellido: e.target.apellido.value,
+                telefono: e.target.telefono.value, disponibilidad: e.target.disponibilidad.value,
+                local1: e.target.local1.value, local2: e.target.local2.value, local3: e.target.local3.value,
+            };
+            await addDoc(personalCol, nuevaPersona);
+            showStatusMessage('Personal agregado');
+            formPersonal.reset();
+        });
+
+        formLocales.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const nombre = e.target['nuevo-local'].value.trim().toLowerCase();
+            const colorPalette = ['#ef4444', '#f97316', '#eab308', '#84cc16', '#22c55e', '#14b8a6', '#06b6d4', '#3b82f6', '#8b5cf6', '#d946ef'];
+            const randomColor = colorPalette[Math.floor(Math.random() * colorPalette.length)];
+            if (nombre && !state.locales.some(l => l.nombre === nombre)) {
+                await addDoc(localesCol, { nombre, color: randomColor });
+                showStatusMessage('Local agregado');
+            } else {
+                showStatusMessage('El local ya existe o el nombre es inválido', 'error');
+            }
+            formLocales.reset();
+        });
+
+        formEditPersonal.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const id = e.target['edit-id'].value;
+            const datosActualizados = {
+                nombre: e.target['edit-nombre'].value, apellido: e.target['edit-apellido'].value,
+                telefono: e.target['edit-telefono'].value, disponibilidad: e.target['edit-disponibilidad'].value,
+                local1: e.target['edit-local1'].value, local2: e.target['edit-local2'].value, local3: e.target['edit-local3'].value,
+            };
+            await setDoc(doc(db, personalCol.path, id), datosActualizados);
+            showStatusMessage('Personal actualizado');
+            editModal.style.display = 'none';
+        });
+
+        formEditLocal.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const id = e.target['edit-local-id'].value;
+            const nombre = e.target['edit-local-name'].value.trim().toLowerCase();
+            const color = e.target['edit-local-color'].value;
+            if (nombre) {
+                await setDoc(doc(db, localesCol.path, id), { nombre, color });
+                showStatusMessage('Local actualizado');
+                editLocalModal.style.display = 'none';
+            }
+        });
+        
+        document.body.addEventListener('click', async (e) => {
+            const target = e.target.closest('button');
+            if (!target) return;
+
+            if (target.matches('.vestimenta-btn')) {
+                const week = state.selectedWeek;
+                const slotId = target.dataset.slotId;
+                const docRef = doc(db, asignacionesCol.path, week);
+
+                const currentVestimenta = state.asignaciones[week]?.[`${slotId}-vestimenta`] || vestimentaOptions[0];
+                const currentIndex = vestimentaOptions.indexOf(currentVestimenta);
+                const nextIndex = (currentIndex + 1) % vestimentaOptions.length;
+                const nextVestimenta = vestimentaOptions[nextIndex];
+
+                await setDoc(docRef, { [`${slotId}-vestimenta`]: nextVestimenta }, { merge: true });
+                return;
+            }
+
+            if (target.matches('.btn-confirmar-persona')) {
+                const personId = target.dataset.personId;
+                const persona = state.personal.find(p => p.id === personId);
+                const week = state.selectedWeek;
+                if (!persona || !week) return;
+
+                if (confirm(`¿Confirmar la asistencia de ${persona.nombre} ${persona.apellido} para toda la semana?`)) {
+                    const asignacionesSemana = state.asignaciones[week] || {};
+                    const updates = {};
+                    Object.entries(asignacionesSemana).forEach(([slotId, pId]) => {
+                        if (pId === personId && !slotId.includes('-vestimenta') && !slotId.includes('-confirmed')) {
+                            updates[`${slotId}-confirmed`] = true;
+                        }
+                    });
+
+                    if (Object.keys(updates).length > 0) {
+                        const docRef = doc(db, asignacionesCol.path, week);
+                        await setDoc(docRef, updates, { merge: true });
+                        showStatusMessage(`Asistencia confirmada para ${persona.nombre} ${persona.apellido}`);
+                    } else {
+                        showStatusMessage(`${persona.nombre} ${persona.apellido} no tiene asignaciones para confirmar.`, 'error');
+                    }
+                }
+            } else if (target.matches('.btn-cambiar-vestimenta-local')) {
+                const localNombre = target.dataset.localNombre;
+                const week = state.selectedWeek;
+                if (!week || !localNombre) return;
+
+                const asignacionesSemana = state.asignaciones[week] || {};
+                const updates = {};
+                
+                let firstAssignedSlotId = null;
+                for (const slotId in asignacionesSemana) {
+                    if (slotId.startsWith(localNombre + '-') && !slotId.includes('-vestimenta') && !slotId.includes('-confirmed') && asignacionesSemana[slotId]) {
+                        firstAssignedSlotId = slotId;
+                        break;
+                    }
+                }
+
+                let currentVestimenta = vestimentaOptions[0];
+                if (firstAssignedSlotId) {
+                    currentVestimenta = asignacionesSemana[`${firstAssignedSlotId}-vestimenta`] || vestimentaOptions[0];
+                }
+                
+                const nextVestimenta = currentVestimenta === vestimentaOptions[0] ? vestimentaOptions[1] : vestimentaOptions[0];
+
+                let hasAssignments = false;
+                Object.keys(asignacionesSemana).forEach(slotId => {
+                    const [local] = slotId.split('-');
+                    if (local === localNombre && !slotId.includes('-vestimenta') && !slotId.includes('-confirmed') && asignacionesSemana[slotId]) {
+                        updates[`${slotId}-vestimenta`] = nextVestimenta;
+                        hasAssignments = true;
+                    }
+                });
+
+                if (hasAssignments) {
+                    if (confirm(`¿Cambiar la vestimenta a ${nextVestimenta} para TODO el personal de ${localNombre.toUpperCase()}?`)) {
+                        const docRef = doc(db, asignacionesCol.path, week);
+                        await setDoc(docRef, updates, { merge: true });
+                        showStatusMessage(`Vestimenta cambiada para ${localNombre.toUpperCase()}`);
+                    }
+                } else {
+                    showStatusMessage(`No hay personal asignado en ${localNombre.toUpperCase()} para cambiar vestimenta.`, 'error');
+                }
+            } else if (target.matches('.btn-editar-personal')) {
+                const id = target.dataset.id;
+                const persona = state.personal.find(p => p.id === id);
+                if (persona) {
+                    formEditPersonal['edit-id'].value = id;
+                    formEditPersonal['edit-nombre'].value = persona.nombre;
+                    formEditPersonal['edit-apellido'].value = persona.apellido;
+                    formEditPersonal['edit-telefono'].value = persona.telefono;
+                    formEditPersonal['edit-disponibilidad'].value = persona.disponibilidad;
+                    formEditPersonal['edit-local1'].value = persona.local1 || '';
+                    formEditPersonal['edit-local2'].value = persona.local2 || '';
+                    formEditPersonal['edit-local3'].value = persona.local3 || '';
+                    editModal.style.display = 'block';
+                }
+            } else if (target.matches('.btn-eliminar-personal')) {
+                const id = target.dataset.id;
+                if (confirm('¿Seguro que quieres eliminar a esta persona?')) {
+                    await deleteDoc(doc(db, personalCol.path, id));
+                    showStatusMessage('Personal eliminado');
+                }
+            } else if (target.matches('.btn-editar-local')) {
+                formEditLocal['edit-local-id'].value = target.dataset.id;
+                formEditLocal['edit-local-name'].value = target.dataset.nombre;
+                formEditLocal['edit-local-color'].value = target.dataset.color;
+                editLocalModal.style.display = 'block';
+            } else if (target.matches('.btn-configurar-horarios')) {
+                const localNombre = target.dataset.nombre;
+                document.getElementById('schedule-config-local-name').textContent = localNombre.toUpperCase();
+                document.getElementById('btn-limpiar-horarios-local').dataset.localNombre = localNombre;
+                const container = document.getElementById('schedule-config-container');
+                renderizarMapeoConfig(localNombre, container);
+                scheduleConfigModal.style.display = 'block';
+            } else if (target.matches('#btn-limpiar-horarios-local')) {
+                const localNombre = target.dataset.localNombre;
+                if (!localNombre) return;
+
+                if (confirm(`¿Estás seguro de que quieres poner en 0 todos los puestos para ${localNombre.toUpperCase()}? Esta acción no se puede deshacer.`)) {
+                    const docRef = doc(db, mapeoConfigCol.path, localNombre);
+                    let config = { ...(state.mapeoConfig[localNombre] || {}) };
+                    
+                    diasSemana.forEach(dia => {
+                        if (config[dia]) {
+                            config[dia].puestos = 0;
+                            config[dia].cacheos = 0;
+                            config[dia].cacheoIngreso = 0;
+                            config[dia].cacheoSalida = 0;
+                        }
+                    });
+
+                    await setDoc(docRef, config);
+                    showStatusMessage(`Horarios limpiados para ${localNombre.toUpperCase()}`);
+                }
+            } else if (target.matches('.btn-eliminar-local')) {
+                const id = target.dataset.id;
+                if (confirm('¿Seguro que quieres eliminar este local?')) {
+                    await deleteDoc(doc(db, localesCol.path, id));
+                    showStatusMessage('Local eliminado');
+                }
+            } else if (target.matches('.btn-copy-schedule')) {
+                const personId = target.dataset.personId;
+                const persona = state.personal.find(p => p.id === personId);
+                if (!persona) return;
+                const week = state.selectedWeek;
+                const asignacionesSemana = state.asignaciones[week] || {};
+                const assignments = Object.entries(asignacionesSemana)
+                    .filter(([slotId, pId]) => pId === personId && !slotId.includes('-vestimenta') && !slotId.includes('-confirmed'))
+                    .map(([slotId, _]) => {
+                        const [local, dia, tipo] = slotId.split('-');
+                        const horaKey = `hora${tipo.charAt(0).toUpperCase() + tipo.slice(1)}`;
+                        return {
+                            local, dia, tipo,
+                            vestimenta: asignacionesSemana[`${slotId}-vestimenta`] || vestimentaOptions[0],
+                            horario: state.mapeoConfig[local]?.[dia]?.[horaKey]
+                        };
+                    })
+                    .sort((a, b) => diasSemana.indexOf(a.dia) - diasSemana.indexOf(b.dia));
+                if (assignments.length === 0) {
+                    showStatusMessage('Esta persona no tiene asignaciones.', 'error');
+                    return;
+                }
+                let message = `¡Hola ${persona.nombre}! Tu programación:\n\n`;
+                assignments.forEach(a => {
+                    message += `• ${diasSemanaFull[diasSemana.indexOf(a.dia)]} en ${a.local.toUpperCase()}: Vestimenta: ${a.vestimenta}. Horario: ${a.horario}.\n`;
+                });
+                const textArea = document.createElement("textarea");
+                textArea.value = message;
+                document.body.appendChild(textArea);
+                textArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textArea);
+                showStatusMessage('Programación copiada');
+            } else if (target.matches('.btn-copy-local-schedule')) {
+                const localNombre = target.dataset.localNombre;
+                const week = state.selectedWeek;
+                const asignacionesSemana = state.asignaciones[week] || {};
+                const localAssignments = Object.entries(asignacionesSemana)
+                    .filter(([slotId, personaId]) => {
+                        const [local] = slotId.split('-');
+                        return local === localNombre && personaId && !slotId.includes('-vestimenta') && !slotId.includes('-confirmed');
+                    })
+                    .map(([slotId, personaId]) => {
+                        const [local, dia, tipo, i] = slotId.split('-');
+                        const persona = state.personal.find(p => p.id === personaId);
+                        const config = state.mapeoConfig[local]?.[dia] || {};
+                        const horaKey = `hora${tipo.charAt(0).toUpperCase() + tipo.slice(1)}`;
+                        const hora = config[horaKey];
+                        return {
+                            dia,
+                            tipo: `${tipoPuestoNombres[tipo] || tipo} ${i}`,
+                            hora,
+                            nombrePersona: persona ? `${persona.nombre} ${persona.apellido}` : 'Sin asignar'
+                        };
+                    });
+
+                if (localAssignments.length === 0) {
+                    showStatusMessage('Este local no tiene personal asignado.', 'error');
+                    return;
+                }
+                const assignmentsByDay = {};
+                diasSemana.forEach(dia => assignmentsByDay[dia] = []);
+                localAssignments.forEach(a => assignmentsByDay[a.dia].push(a));
+
+                let message = `*Programación para ${localNombre.toUpperCase()} - Semana ${week}*\n\n`;
+                diasSemana.forEach((dia, index) => {
+                    const dailyAssignments = assignmentsByDay[dia];
+                    if (dailyAssignments.length > 0) {
+                        message += `*${diasSemanaFull[index]}*\n`;
+                        dailyAssignments.forEach(a => {
+                            message += `- ${a.tipo}: ${a.nombrePersona} (${a.hora})\n`;
+                        });
+                        message += '\n';
+                    }
+                });
+
+                const textArea = document.createElement("textarea");
+                textArea.value = message;
+                document.body.appendChild(textArea);
+                textArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textArea);
+                showStatusMessage('Programación del local copiada');
+            } else if (target.matches('.btn-cargar-historial')) {
+                const week = target.dataset.week;
+                if (confirm(`¿Cargar la programación de la semana ${week}?`)) {
+                    const dataHistorial = state.historial[week];
+                    if (dataHistorial) {
+                        if (dataHistorial.asignaciones) {
+                            await setDoc(doc(db, asignacionesCol.path, week), dataHistorial.asignaciones);
+                        }
+                        if (dataHistorial.mapeoConfig) {
+                            for (const local in dataHistorial.mapeoConfig) {
+                                await setDoc(doc(db, mapeoConfigCol.path, local), dataHistorial.mapeoConfig[local]);
+                            }
+                        }
+                        state.selectedWeek = week;
+                        semanaInputMapeo.value = week;
+                        semanaInputProgramacion.value = week;
+                        cambiarVista('mapeo');
+                        showStatusMessage(`Programación cargada.`);
+                    }
+                }
+            } else if (target.matches('.btn-eliminar-historial')) {
+                const week = target.dataset.week;
+                if (confirm(`¿Eliminar el historial de la semana ${week}?`)) {
+                    await deleteDoc(doc(db, historialCol.path, week));
+                    showStatusMessage('Historial eliminado');
+                }
+            } else if (target.matches('.btn-descargar-historial')) {
+                descargarExcel(target.dataset.week, state.historial[target.dataset.week]);
+            } else if (target.matches('#btn-guardar-programacion')) {
+                const week = state.selectedWeek;
+                if (week) {
+                    const dataToSave = {
+                        asignaciones: state.asignaciones[week] || {},
+                        mapeoConfig: state.mapeoConfig
+                    };
+                    await setDoc(doc(db, historialCol.path, week), dataToSave);
+                    showStatusMessage('Programación guardada');
+                } else {
+                    showStatusMessage('Selecciona una semana primero.', 'error');
+                }
+            } else if (target.matches('#btn-limpiar-mapeo')) {
+                if (confirm('¿Limpiar las asignaciones de la semana?')) {
+                    await setDoc(doc(db, asignacionesCol.path, state.selectedWeek), {});
+                    showStatusMessage('Mapeo limpiado');
+                }
+            } else if (target.matches('#btn-descargar-excel')) {
+                descargarExcel(state.selectedWeek, { asignaciones: state.asignaciones[state.selectedWeek], mapeoConfig: state.mapeoConfig });
+            } else if (target.matches('#btn-importar-personal')) {
+                importPersonalInput.click();
+            } else if (target.matches('#btn-exportar-personal')) {
+                exportarPersonalExcel();
+            }
+        });
+
+        document.body.addEventListener('change', async (e) => {
+            const target = e.target;
+            if (target.matches('.mapeo-config-input')) {
+                const { local, dia, type, part } = target.dataset;
+                const docRef = doc(db, mapeoConfigCol.path, local);
+                let config = { ...(state.mapeoConfig[local] || {}) };
+                if (!config[dia]) config[dia] = {};
+                
+                if (part === 'count') {
+                    config[dia][type] = parseInt(target.value, 10);
+                } else {
+                    const horaKey = `hora${type.charAt(0).toUpperCase() + type.slice(1)}`;
+                    const hour = target.closest('div').querySelector(`[data-local="${local}"][data-dia="${dia}"][data-type="${type}"][data-part="hour"]`).value;
+                    const minute = target.closest('div').querySelector(`[data-local="${local}"][data-dia="${dia}"][data-type="${type}"][data-part="minute"]`).value;
+                    const ampm = target.closest('div').querySelector(`[data-local="${local}"][data-dia="${dia}"][data-type="${type}"][data-part="ampm"]`).value;
+                    config[dia][horaKey] = `${hour}:${minute} ${ampm}`;
+                }
+                await setDoc(docRef, config);
+            } else if (target.matches('.mapeo-select, .confirmation-checkbox')) {
+                const week = state.selectedWeek;
+                const slotId = target.dataset.slotId;
+                const docRef = doc(db, asignacionesCol.path, week);
+                let value;
+                let key = slotId;
+                if(target.matches('.mapeo-select')) {
+                    value = target.value;
+                } else { // confirmation-checkbox
+                    key = `${slotId}-confirmed`;
+                    value = target.checked;
+                }
+                await setDoc(docRef, { [key]: value }, { merge: true });
+            }
+        });
+        
+        importPersonalInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = async (event) => {
+                try {
+                    const data = new Uint8Array(event.target.result);
+                    const workbook = XLSX.read(data, {type: 'array'});
+                    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                    const jsonData = XLSX.utils.sheet_to_json(firstSheet);
+                    
+                    let importados = 0;
+                    for (const persona of jsonData) {
+                        const nuevaPersona = {
+                            nombre: persona.nombre || '',
+                            apellido: persona.apellido || '',
+                            telefono: persona.telefono || '',
+                            disponibilidad: persona.disponibilidad || 'disponible',
+                            local1: persona.local1 || '',
+                            local2: persona.local2 || '',
+                            local3: persona.local3 || '',
+                        };
+                        if(nuevaPersona.nombre && nuevaPersona.apellido) {
+                            await addDoc(personalCol, nuevaPersona);
+                            importados++;
+                        }
+                    }
+                    showStatusMessage(`${importados} personas importadas con éxito.`);
+                } catch (error) {
+                    showStatusMessage('Error al importar el archivo. Asegúrate de que el formato es correcto.', 'error');
+                    console.error("Error de importación:", error);
+                } finally {
+                    e.target.value = ''; // Reset file input
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        });
+
+        document.getElementById('close-modal').onclick = () => editModal.style.display = 'none';
+        document.getElementById('close-local-modal').onclick = () => editLocalModal.style.display = 'none';
+        document.getElementById('close-schedule-config-modal').onclick = () => scheduleConfigModal.style.display = 'none';
+        navButtons.forEach(btn => btn.addEventListener('click', () => cambiarVista(btn.id.split('-')[1])));
+        semanaInputMapeo.addEventListener('change', (e) => { state.selectedWeek = e.target.value; semanaInputProgramacion.value = e.target.value; renderizarMapeo(); });
+        semanaInputProgramacion.addEventListener('change', (e) => { state.selectedWeek = e.target.value; semanaInputMapeo.value = e.target.value; renderizarProgramacionPersonal(); });
+        
+        const debouncedRenderProgramacion = debounce(() => renderizarProgramacionPersonal(), 300);
+        busquedaProgramacionInput.addEventListener('input', e => {
+            state.searchTermProgramacion = e.target.value.toLowerCase().trim();
+            debouncedRenderProgramacion();
+        });
+        
+        const debouncedRenderMapeo = debounce(() => renderizarMapeo(), 300);
+        filtroLocalBusquedaInput.addEventListener('input', e => {
+            state.searchTermMapeo = e.target.value.toLowerCase().trim();
+            debouncedRenderMapeo();
+        });
+        
+        // --- Funciones de Utilidad ---
+        function exportarPersonalExcel() {
+            if (state.personal.length === 0) {
+                showStatusMessage('No hay personal para exportar.', 'error');
+                return;
+            }
+            const dataToExport = state.personal.map(({ id, ...rest }) => rest);
+            const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, 'Personal');
+            XLSX.writeFile(workbook, `Personal_SwattMapee.xlsx`);
+            showStatusMessage('Exportando personal a Excel.');
+        }
+
+        function debounce(func, delay = 250) {
+            let timeout;
+            return (...args) => {
+                clearTimeout(timeout);
+                timeout = setTimeout(() => {
+                    func.apply(this, args);
+                }, delay);
+            };
+        }
+
+        Date.prototype.getWeek = function() {
+            const date = new Date(this.getTime());
+            date.setHours(0, 0, 0, 0);
+            date.setDate(date.getDate() + 3 - (date.getDay() + 6) % 7);
+            const week1 = new Date(date.getFullYear(), 0, 4);
+            return 1 + Math.round(((date.getTime() - week1.getTime()) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7);
+        }
+
+        function getWeekDates(weekString) {
+            if (!weekString) return {};
+            const [year, weekNum] = weekString.split('-W').map(Number);
+            const firstDayOfYear = new Date(year, 0, 1);
+            const dayOffset = (11 - firstDayOfYear.getDay()) % 7;
+            const date = new Date(year, 0, 1 + dayOffset + (weekNum - 1) * 7);
+            const dates = {};
+            const monday = new Date(date);
+            monday.setDate(date.getDate() - 3);
+
+            for (let i = 0; i < 7; i++) {
+                const currentDay = new Date(monday);
+                currentDay.setDate(monday.getDate() + i);
+                const dayName = diasSemana[i];
+                dates[dayName] = currentDay.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' });
+            }
+            return dates;
+        }
+
+        function inicializarApp() {
+            if (!state.selectedWeek) {
+                const now = new Date();
+                const year = now.getFullYear();
+                const week = now.getWeek();
+                state.selectedWeek = `${year}-W${String(week).padStart(2, '0')}`;
+            }
+            semanaInputMapeo.value = state.selectedWeek;
+            semanaInputProgramacion.value = state.selectedWeek;
+            cambiarVista('gestion');
+            loader.style.display = 'none';
+        }
+
+        function cambiarVista(vista) {
+            state.currentView = vista;
+            allSections.forEach(s => s.classList.add('hidden'));
+            navButtons.forEach(b => b.classList.remove('active'));
+            document.getElementById(`section-${vista}`).classList.remove('hidden');
+            document.getElementById(`btn-${vista}`).classList.add('active');
+
+            // Renderizado selectivo basado en la vista
+            switch(vista) {
+                case 'gestion':
+                    renderizarTablaLocales();
+                    renderizarTablaPersonal();
+                    break;
+                case 'mapeo':
+                    renderizarMapeo();
+                    break;
+                case 'programacion':
+                    renderizarProgramacionPersonal();
+                    break;
+                case 'historial':
+                    renderizarHistorial();
+                    break;
+            }
+        }
+
+        function recalculateConflicts() {
+            const week = state.selectedWeek;
+            const asignacionesSemana = state.asignaciones[week] || {};
+            
+            // Daily Conflicts
+            const personalAsignadoPorDia = {};
+            const dailyConflicts = new Set();
+            Object.entries(asignacionesSemana).forEach(([slotId, personaId]) => {
+                if (!personaId || slotId.includes('-vestimenta') || slotId.includes('-confirmed')) return;
+                const dia = slotId.split('-')[1];
+                if (!personalAsignadoPorDia[dia]) personalAsignadoPorDia[dia] = new Set();
+                if (personalAsignadoPorDia[dia].has(personaId)) dailyConflicts.add(personaId);
+                personalAsignadoPorDia[dia].add(personaId);
+            });
+            state.dailyConflicts = dailyConflicts;
+
+            // Schedule Conflicts
+            const scheduleByPerson = {};
+            const conflictingSlots = new Set();
+            Object.entries(asignacionesSemana).forEach(([slotId, personaId]) => {
+                if (!personaId || slotId.includes('-vestimenta') || slotId.includes('-confirmed')) return;
+                if (!scheduleByPerson[personaId]) scheduleByPerson[personaId] = [];
+                const [local, dia, tipo] = slotId.split('-');
+                const diaIndex = diasSemana.indexOf(dia);
+                const horaKey = `hora${tipo.charAt(0).toUpperCase() + tipo.slice(1)}`;
+                const hora = state.mapeoConfig[local]?.[dia]?.[horaKey];
+                if (hora) {
+                    const startMinutes = diaIndex * 1440 + timeToMinutes(hora);
+                    scheduleByPerson[personaId].push({ slotId: `${week}-${slotId}`, startMinutes });
+                }
+            });
+
+            Object.values(scheduleByPerson).forEach(assignments => {
+                if (assignments.length < 2) return;
+                assignments.sort((a, b) => a.startMinutes - b.startMinutes);
+                for (let i = 0; i < assignments.length - 1; i++) {
+                    const currentEndTime = assignments[i].startMinutes + 480; // Asume 8 horas
+                    const timeBetween = assignments[i+1].startMinutes - currentEndTime;
+                    if (timeBetween >= 0 && timeBetween < 480) { // Menos de 8h de descanso
+                        conflictingSlots.add(assignments[i].slotId);
+                        conflictingSlots.add(assignments[i+1].slotId);
+                    }
+                }
+            });
+            state.scheduleConflicts = conflictingSlots;
+        }
+
+        function descargarExcel(week, scheduleData) {
+            if (!scheduleData || !scheduleData.asignaciones) { 
+                showStatusMessage(`No hay datos para la semana ${week}.`, 'error');
+                return; 
+            }
+            const data = Object.entries(scheduleData.asignaciones)
+                .filter(([slotId, personaId]) => personaId && !slotId.includes('-vestimenta') && !slotId.includes('-confirmed'))
+                .map(([slotId, personaId]) => {
+                    const [local, dia, tipo] = slotId.split('-');
+                    const persona = state.personal.find(p => p.id === personaId);
+                    const config = (scheduleData.mapeoConfig && scheduleData.mapeoConfig[local]?.[dia]) || state.mapeoConfig[local]?.[dia] || {};
+                    const horaKey = `hora${tipo.charAt(0).toUpperCase() + tipo.slice(1)}`;
+                    const hora = config[horaKey];
+                    const vestimenta = scheduleData.asignaciones[`${slotId}-vestimenta`] || vestimentaOptions[0];
+                    return {
+                        'Fecha': getWeekDates(week)[dia] || 'N/A', 'Día': diasSemanaFull[diasSemana.indexOf(dia)],
+                        'Local': local.toUpperCase(), 'Puesto': tipoPuestoNombres[tipo] || tipo,
+                        'Nombre': persona ? `${persona.nombre} ${persona.apellido}` : 'N/A',
+                        'Hora': hora, 'Vestimenta': vestimenta
+                    };
+                });
+            if (data.length === 0) { showStatusMessage('No hay asignaciones válidas.', 'error'); return; }
+            const worksheet = XLSX.utils.json_to_sheet(data);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, 'Programacion');
+            XLSX.writeFile(workbook, `Programacion_${week}.xlsx`);
+        }
+        function showStatusMessage(message, type = 'success') {
+            const container = document.getElementById('status-message-container');
+            const div = document.createElement('div');
+            div.className = `${type === 'success' ? 'bg-green-500' : 'bg-red-500'} text-white font-bold rounded-lg shadow-lg py-3 px-5 transition-all duration-300 transform translate-x-full`;
+            div.textContent = message;
+            container.appendChild(div);
+            setTimeout(() => div.classList.remove('translate-x-full'), 10);
+            setTimeout(() => {
+                div.classList.add('translate-x-full');
+                setTimeout(() => div.remove(), 300);
+            }, 3000);
+        }
+        function timeToMinutes(timeStr) {
+            if (!timeStr) return 0;
+            const match = timeStr.match(/(\d+):(\d+) (AM|PM)/);
+            if (!match) return 0;
+            let [_, hours, minutes, ampm] = match;
+            hours = parseInt(hours, 10);
+            minutes = parseInt(minutes, 10);
+            if (ampm === 'PM' && hours !== 12) hours += 12;
+            if (ampm === 'AM' && hours === 12) hours = 0;
+            return hours * 60 + minutes;
+        }
+    </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.17.0/xlsx.full.min.js"></script>
+</body>
+</html>
+
